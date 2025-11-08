@@ -1,0 +1,144 @@
+# ==============================================================================
+# FILE: gui_app_v2.py (PHIÊN BẢN HOÀN THIỆN - SỬA LỖI CỠ CHỮ LẦN CUỐI)
+# ==============================================================================
+
+import tkinter as tk
+from tkinter import font, messagebox
+from PIL import Image, ImageTk
+import database as db
+import api_handler as api
+
+# --- LOGIC XỬ LÝ DỮ LIỆU (Không thay đổi) ---
+def fetch_weather_data(city_input):
+    parts = [p.strip() for p in city_input.split(',')]
+    city_name, country_code = (parts[0], parts[1].upper()) if len(parts) > 1 else (parts[0], None)
+    
+    if not country_code:
+        messagebox.showerror("Lỗi Đầu Vào", "Vui lòng nhập theo định dạng 'Thành phố, Mã quốc gia'.")
+        return None, None
+
+    location = db.get_location(city_name, country_code)
+    if location:
+        weather_from_cache = db.get_recent_weather(location['id'])
+        if weather_from_cache:
+            return weather_from_cache['data_json'], "Cache 💾"
+            
+    new_weather_data = api.get_weather_data(f"{city_name},{country_code}")
+    if new_weather_data:
+        location_id = location['id'] if location else None
+        if not location_id:
+            coords = new_weather_data.get('coord', {})
+            location_id = db.add_location(
+                new_weather_data.get('name'), 
+                new_weather_data.get('sys', {}).get('country'), 
+                coords.get('lat'), coords.get('lon')
+            )
+        if location_id:
+            db.add_weather_cache(location_id, new_weather_data)
+        return new_weather_data, "API 📡"
+        
+    messagebox.showwarning("Không Tìm Thấy", f"Không thể tìm thấy thông tin cho '{city_input}'.")
+    return None, None
+
+# --- Thiết lập giao diện ---
+BG_COLOR, FRAME_COLOR, TEXT_COLOR = "#F5F5F5", "#FFFFFF", "#1F1F1F"
+BUTTON_COLOR, BUTTON_TEXT = "#4A90E2", "#FFFFFF"
+
+# ==============================================================================
+# === SỬA LỖI TẠI ĐÂY: Giảm cỡ chữ tiêu đề xuống 20 ===
+# ==============================================================================
+TITLE_FONT = ("Helvetica", 20, "bold") # Giảm từ 22 xuống 20
+RESULT_FONT = ("Helvetica", 14)
+DEFAULT_FONT = ("Helvetica", 12)
+
+root = tk.Tk()
+root.title("Ứng Dụng Thời Tiết - Hoàn Chỉnh")
+root.geometry("450x580")
+root.configure(bg=BG_COLOR)
+root.resizable(False, False)
+
+# KHỐI 1: NHẬP LIỆU
+input_frame = tk.Frame(root, bg=FRAME_COLOR, padx=15, pady=15)
+input_frame.pack(fill=tk.X, padx=20, pady=(20, 10))
+tk.Label(input_frame, text="Nhập (Thành phố, Mã quốc gia):", font=DEFAULT_FONT, bg=FRAME_COLOR, fg=TEXT_COLOR).pack()
+city_entry = tk.Entry(input_frame, font=("Helvetica", 14), width=25, relief=tk.FLAT, justify='center')
+city_entry.pack(pady=10)
+city_entry.insert(0, "Hue, VN")
+
+# KHỐI 2: KẾT QUẢ CHÍNH
+main_result_frame = tk.Frame(root, bg=FRAME_COLOR, padx=15, pady=20)
+main_result_frame.pack(fill=tk.X, padx=20, pady=10)
+
+location_label = tk.Label(main_result_frame, text="---", font=TITLE_FONT, bg=FRAME_COLOR, fg=TEXT_COLOR)
+location_label.pack(pady=5)
+
+icon_label = tk.Label(main_result_frame, bg=FRAME_COLOR)
+icon_label.pack()
+temp_label = tk.Label(main_result_frame, text="--°C", font=("Helvetica", 48, "bold"), bg=FRAME_COLOR, fg=TEXT_COLOR)
+temp_label.pack()
+desc_label = tk.Label(main_result_frame, text="---", font=("Helvetica", 16, "italic"), bg=FRAME_COLOR, fg=TEXT_COLOR)
+desc_label.pack()
+
+# KHỐI 3: CHI TIẾT
+details_frame = tk.Frame(root, bg=FRAME_COLOR, padx=15, pady=15)
+details_frame.pack(fill=tk.X, padx=20, pady=10)
+details_frame.columnconfigure((0, 1), weight=1)
+humidity_label = tk.Label(details_frame, text="Độ ẩm: --%", font=RESULT_FONT, bg=FRAME_COLOR, fg=TEXT_COLOR)
+humidity_label.grid(row=0, column=0, sticky="w")
+wind_label = tk.Label(details_frame, text="Gió: -- m/s", font=RESULT_FONT, bg=FRAME_COLOR, fg=TEXT_COLOR)
+wind_label.grid(row=0, column=1, sticky="e")
+
+# KHỐI 4: NÚT BẤM VÀ TRẠNG THÁI
+action_frame = tk.Frame(root, bg=BG_COLOR)
+action_frame.pack(fill=tk.X, padx=20, pady=10)
+
+search_button = tk.Button(action_frame, text="Xem Thời Tiết", font=DEFAULT_FONT, 
+                          bg=BUTTON_COLOR, fg=BUTTON_TEXT, relief=tk.FLAT,
+                          activebackground="#357ABD", activeforeground=BUTTON_TEXT,
+                          padx=10, pady=5)
+search_button.pack()
+
+status_label = tk.Label(action_frame, text="", font=("Helvetica", 10, "italic"), bg=BG_COLOR, fg=TEXT_COLOR)
+status_label.pack(pady=5)
+
+def update_ui(weather_data, source):
+    # (Hàm này không thay đổi)
+    if weather_data:
+        location_label.config(text=f"{weather_data['name']}, {weather_data['sys']['country']}")
+        temp_label.config(text=f"{weather_data['main']['temp']:.0f}°C")
+        desc_label.config(text=weather_data['weather'][0]['description'].capitalize())
+        humidity_label.config(text=f"Độ ẩm: {weather_data['main']['humidity']}%")
+        wind_label.config(text=f"Gió: {weather_data['wind']['speed']} m/s")
+        status_label.config(text=f"Nguồn: {source}")
+        icon_code = weather_data['weather'][0]['icon']
+        try:
+            image = Image.open(f"icons/{icon_code}.png")
+            photo = ImageTk.PhotoImage(image)
+            icon_label.config(image=photo)
+            icon_label.image = photo
+        except FileNotFoundError:
+            icon_label.config(image=None, text=f"({icon_code})")
+    else:
+        location_label.config(text="---")
+        temp_label.config(text="--°C")
+        desc_label.config(text="---")
+        humidity_label.config(text="Độ ẩm: --%")
+        wind_label.config(text="Gió: -- m/s")
+        status_label.config(text="")
+        icon_label.config(image=None)
+
+def on_search_click(event=None):
+    # (Hàm này không thay đổi)
+    city = city_entry.get()
+    if not city: return
+    search_button.config(state="disabled")
+    status_label.config(text="Đang tìm kiếm...")
+    root.update_idletasks()
+    weather_data, source = fetch_weather_data(city)
+    update_ui(weather_data, source)
+    search_button.config(state="normal")
+
+search_button.config(command=on_search_click)
+city_entry.bind("<Return>", on_search_click)
+
+root.mainloop()
